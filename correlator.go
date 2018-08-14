@@ -15,66 +15,107 @@ const (
 	timeout = time.Minute
 )
 
+var httpClient = http.DefaultClient
+var replyChannels = newRepliesMap()
+var claimChecks = make(map[string]string)
+
 func main() {
-	httpClient := http.DefaultClient
-	repliesMap := newRepliesMap()
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		s := strings.Split(r.URL.Path, "/")
-		if len(s) != 2 {
-			w.WriteHeader(404)
-			return
-		}
-		channel := s[1]
-		if channel == "" {
-			fmt.Printf("response headers: %v", r.Header)
-			correlationID := r.Header.Get("knative-correlation-id")
-			replies := repliesMap.Get(correlationID)
-			if replies == nil {
-				// TODO: unknown correlationID; could be a timeout
-			}
-			reply, err := ioutil.ReadAll(r.Body)
-			if err != nil {
-				// TODO
-			}
-			fmt.Printf("REPLY %s: %s\n", correlationID, reply)
-			replies <- string(reply)
+		if r.Method == "POST" {
+			handlePost(w, r)
 		} else {
-			fmt.Printf("SENDING TO %s\n", channel)
-			// TODO: namespace
-			url := fmt.Sprintf("http://%s-channel.default.svc.cluster.local", channel)
-			req, err := http.NewRequest(http.MethodPost, url, r.Body)
-			if err != nil {
-				fmt.Fprintf(w, "Unable to create request %v", err)
-				return
-			}
-			uuid, err := uuid.NewRandom()
-			// TODO err
-			correlationID := uuid.String()
-			replyChan := make(chan string)
-			repliesMap.Put(correlationID, replyChan)
-			defer repliesMap.Delete(correlationID)
-			req.Header = r.Header
-			req.Header.Add("knative-correlation-id", correlationID)
-			fmt.Printf("headers: %v\n", req.Header)
-			res, err := httpClient.Do(req)
-			if err != nil {
-				fmt.Fprintf(w, "failed to make request %v", err)
-				return
-			} else if res.StatusCode >= 400 {
-				fmt.Fprintf(w, "status: %d", res.StatusCode)
-				return
-			} else {
-				select {
-				case reply := <-replyChan:
-					w.Write([]byte(reply))
-				case <-time.After(timeout):
-					w.WriteHeader(404)
-				}
-			}
-			return
+			handleGet(w, r)
 		}
 	})
 	http.ListenAndServe(":8080", nil)
+}
+
+func handlePost(w http.ResponseWriter, r *http.Request) {
+	s := strings.Split(r.URL.Path, "/")
+	if len(s) != 2 {
+		w.WriteHeader(404)
+		return
+	}
+	channel := s[1]
+	if channel == "" { // handle reply
+		fmt.Printf("response headers: %v", r.Header)
+		correlationID := r.Header.Get("knative-correlation-id")
+		reply, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			// TODO
+		}
+		fmt.Printf("REPLY %s: %s\n", correlationID, reply)
+		replyChannel := replyChannels.Get(correlationID)
+		if replyChannel != nil {
+			replyChannel <- string(reply)
+		} else {
+			// timeout or non-blocking request
+			claimChecks[correlationID] = string(reply)
+		}
+	} else {
+		uuid, err := uuid.NewRandom()
+		if err != nil {
+			fmt.Print("failed to create correlation ID")
+			w.WriteHeader(500)
+			return
+		}
+		correlationID := uuid.String()
+		blocking := r.Header.Get("knative-blocking-request") == "true"
+		var replyChan chan string
+		if blocking {
+			replyChan = make(chan string)
+			replyChannels.Put(correlationID, replyChan)
+			defer replyChannels.Delete(correlationID)
+		}
+		err = sendToChannel(channel, correlationID, r)
+		if err != nil {
+			fmt.Fprintf(w, "Failed to send to channel %v", err)
+			return
+		}
+		if !blocking {
+			w.Header().Add("knative-correlation-id", correlationID)
+			w.WriteHeader(202)
+			return
+		}
+		select {
+		case reply := <-replyChan:
+			w.Write([]byte(reply))
+		case <-time.After(timeout):
+			w.WriteHeader(404)
+		}
+		return
+	}
+}
+
+func handleGet(w http.ResponseWriter, r *http.Request) {
+	s := strings.Split(r.URL.Path, "/")
+	if len(s) != 2 {
+		w.WriteHeader(404)
+		return
+	}
+	key := s[1]
+	w.Write([]byte(claimChecks[key]))
+}
+
+func sendToChannel(channel string, correlationID string, r *http.Request) error {
+	fmt.Printf("SENDING TO %s\n", channel)
+	// TODO: namespace
+	url := fmt.Sprintf("http://%s-channel.default.svc.cluster.local", channel)
+	req, err := http.NewRequest(http.MethodPost, url, r.Body)
+	if err != nil {
+		return err
+	}
+	req.Header = r.Header
+	req.Header.Add("knative-correlation-id", correlationID)
+	fmt.Printf("headers: %v\n", req.Header)
+	res, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	if res.StatusCode >= 400 {
+		return fmt.Errorf("status: %d", res.StatusCode)
+	}
+	return nil
 }
 
 // Type repliesMap implements a concurrent safe map of channels to send replies to, keyed by correlationIds

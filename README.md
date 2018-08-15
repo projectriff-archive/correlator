@@ -62,10 +62,16 @@ curl http://$(minikube ip):32380/numbers -is \
   | sed "s/.*knative-correlation-id: \(.*\)/\1/g"
 ```
 
+you should see a correlation ID similar to this:
+
+```
+b9962c86-b01b-4bc5-b624-c417032d1e4b
+```
+
 retrieve the result for the returned correlation ID:
 
 ```
-curl http://$(minikube ip):32380/[correlation-id-returned-above] \
+curl http://$(minikube ip):32380/b9962c86-b01b-4bc5-b624-c417032d1e4b \
   -HHost:correlator.default.example.com -w'\n'
 ```
 
@@ -74,4 +80,3 @@ you should see:
 ```
 hello 121
 ```
-

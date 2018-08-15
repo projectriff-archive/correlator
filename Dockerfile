@@ -4,7 +4,8 @@ ARG PACKAGE=github.com/markfisher/correlator
 ARG COMMAND=correlator
 
 WORKDIR /go/src/${PACKAGE}
-COPY . .
+COPY correlator.go .
+COPY vendor/ vendor/
 
 RUN CGO_ENABLED=0 go build -v -a -installsuffix cgo ${COMMAND}.go
 

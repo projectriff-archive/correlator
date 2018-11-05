@@ -94,12 +94,9 @@ func handleGet(w http.ResponseWriter, r *http.Request) {
 
 func parsePathToChannel(path string) (namespace, channel string) {
 	s := strings.Split(path, "/")
-	channel = s[1]
 	if len(s) >= 3 {
-		namespace = s[2]
-	}
-	if namespace == "" {
-		namespace = "default"
+		namespace = s[1]
+		channel = s[2]
 	}
 	return
 }

@@ -31,12 +31,7 @@ func main() {
 }
 
 func handlePost(w http.ResponseWriter, r *http.Request) {
-	s := strings.Split(r.URL.Path, "/")
-	if len(s) != 2 {
-		w.WriteHeader(404)
-		return
-	}
-	channel := s[1]
+	namespace, channel := parsePathToChannel(r.URL.Path)
 	if channel == "" { // handle reply
 		fmt.Printf("response headers: %v", r.Header)
 		correlationID := r.Header.Get("knative-correlation-id")
@@ -67,7 +62,7 @@ func handlePost(w http.ResponseWriter, r *http.Request) {
 			replyChannels.Put(correlationID, replyChan)
 			defer replyChannels.Delete(correlationID)
 		}
-		err = sendToChannel(channel, correlationID, r)
+		err = sendToChannel(namespace, channel, correlationID, r)
 		if err != nil {
 			fmt.Fprintf(w, "Failed to send to channel %v", err)
 			return
@@ -97,10 +92,18 @@ func handleGet(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(claimChecks[key]))
 }
 
-func sendToChannel(channel string, correlationID string, r *http.Request) error {
-	fmt.Printf("SENDING TO %s\n", channel)
-	// TODO: namespace
-	url := fmt.Sprintf("http://%s-channel.default.svc.cluster.local", channel)
+func parsePathToChannel(path string) (namespace, channel string) {
+	s := strings.Split(path, "/")
+	if len(s) >= 3 {
+		namespace = s[1]
+		channel = s[2]
+	}
+	return
+}
+
+func sendToChannel(namespace, channel string, correlationID string, r *http.Request) error {
+	fmt.Printf("SENDING TO %s/%s\n", namespace, channel)
+	url := fmt.Sprintf("http://%s-channel.%s.svc.cluster.local", channel, namespace)
 	req, err := http.NewRequest(http.MethodPost, url, r.Body)
 	if err != nil {
 		return err

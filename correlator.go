@@ -58,7 +58,7 @@ func handlePost(w http.ResponseWriter, r *http.Request) {
 		blocking := r.Header.Get("knative-blocking-request") == "true"
 		var replyChan chan string
 		if blocking {
-			replyChan = make(chan string)
+			replyChan = make(chan string, 1)
 			replyChannels.Put(correlationID, replyChan)
 			defer replyChannels.Delete(correlationID)
 		}

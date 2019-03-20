@@ -103,7 +103,7 @@ func parsePathToChannel(path string) (namespace, channel string) {
 
 func sendToChannel(namespace, channel string, correlationID string, r *http.Request) error {
 	fmt.Printf("SENDING TO %s/%s\n", namespace, channel)
-	url := fmt.Sprintf("http://%s-channel.%s.svc.cluster.local", channel, namespace)
+	url := fmt.Sprintf("https://%s-channel.%s.svc.cluster.local", channel, namespace)
 	req, err := http.NewRequest(http.MethodPost, url, r.Body)
 	if err != nil {
 		return err
